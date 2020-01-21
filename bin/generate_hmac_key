@@ -1,0 +1,6 @@
+#!/bin/sh
+
+LENGTH=${1:-32}
+KEY=`od  -vN "$LENGTH" -An -tx1 /dev/urandom | tr -d " \n" | tr "[:lower:]" "[:upper:]"; echo`
+
+echo "$KEY"

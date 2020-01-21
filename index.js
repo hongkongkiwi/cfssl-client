@@ -1,16 +1,42 @@
-const _ = require('lodash')
-const restify = require('restify-clients');
+const _ = require("lodash")
+const restify = require("restify-clients");
+const crypto = require('crypto')
 
 class CFSSL {
+
   constructor(options) {
     this._options = _.extend({
-      url: 'http://localhost:8888',
-      basePath: '/api/v1/cfssl'
+      url: "http://localhost:8888",
+      basePath: "/api/v1/cfssl",
+      hmacKey: "6A3A5AF0EB0097E8EDF8167C4D99D06CFA6191C92F695BA8E8B38AEDA8EE778A",
+      hmacAlgo: "sha256"
     }, options)
     
     this._client = restify.createJsonClient({
       url: this._options.url
     })
+  }
+
+  _authParams(params, key) {
+    let newParams = params
+    if (_.has(this._options.hmacKey) && this._options.hmacKey.length > 0) {
+      newParams = {
+        // this is a required field; it contains the computed authentication token.
+        token: crypto.createHmac(this._options.hmacAlgo, this._options.hmacKey).update(params).digest("base64"),
+        // this is a required field; the JSON-encoded request being made.
+        request: params,
+        // an optional field containing a Unix timestamp. This might be used by an authentication provider; the standard authenticator does not use this.
+        timestamp: Math.floor(Date.now() / 1000),
+        // an optional field containing the address or hostname of the server; this may be used by an authentication provider. The standard authenticator does not use this field.
+        remote_address: this._options.url
+      }
+    }
+    return newParams
+  }
+
+  generateHMACKey(length) {
+    length = parseInt(length) > 0 ? length : 32
+    return crypto.randomBytes(length).toString('hex').toUpperCase()
   }
 
   // authenticated signing endpoint
@@ -60,10 +86,10 @@ class CFSSL {
   }
   // obtain information about the CA, including the CA certificate
   info() {
-            "CA": {
-                "expiry": "127200h",
-                "pathlen": 0
-            },
+    // "CA": {
+    //     "expiry": "127200h",
+    //     "pathlen": 0
+    // },
   }
   // initialise a new certificate authority
   init_ca(san_hosts, ca_attributes, common_name, key, ca_config) {
@@ -88,7 +114,7 @@ class CFSSL {
       if (!_.isUndefined(ca_config))
         params.CA = ca_config
 
-      client.post(basePath + '/init_ca', params, (err, req, res, obj) => {
+      client.post(basePath + "/init_ca", this._authParams(params), (err, req, res, obj) => {
         if (err) return reject(err)
         // if (!obj.success) return reject()
         return resolve(obj.result)
@@ -121,7 +147,7 @@ class CFSSL {
       //     * certificate: a PEM-encoded self-signed CA certificate
       
       // Example:
-      //     $ curl -d '{"hosts":["www.example.com"], "names":[{"C":"US", "ST":"California", "L":"San Francisco", "O":"example.com"}], "CN": "www.example.com"}' \
+      //     $ curl -d "{"hosts":["www.example.com"], "names":[{"C":"US", "ST":"California", "L":"San Francisco", "O":"example.com"}], "CN": "www.example.com"}" \
       //           ${CFSSL_HOST}/api/v1/cfssl/init_ca  \
       //           | python -m json.tool
       
@@ -162,7 +188,8 @@ class CFSSL {
 }
 
 const cfssl = new CFSSL()
-cfssl.init_ca('www.example.com', [{"C":"US", "ST":"California", "L":"San Francisco", "O":"example.com"}]).then((result) => {
+
+cfssl.init_ca("www.example.com", [{"C":"US", "ST":"California", "L":"San Francisco", "O":"example.com"}]).then((result) => {
   console.log(result)
 }).catch((err) => {
   console.error(err)
