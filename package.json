@@ -9,6 +9,8 @@
   "author": "Andy Savage <andy@savage.hk>",
   "license": "MIT",
   "dependencies": {
+    "is-ip": "^3.1.0",
+    "is-regex": "^1.0.5",
     "lodash": "^4.17.15",
     "restify-clients": "^2.6.8"
   }
