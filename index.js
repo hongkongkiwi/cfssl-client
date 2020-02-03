@@ -213,37 +213,44 @@ class CFSSL {
     * each family, there exists a `description` containing a string describing the
     * family and a `scanners` object mapping each of the family's scanners to
     * an object containing a `description` string.
+    * 
+    * Required parameters:
     *
-    * @since      x.x.x
-    * @deprecated x.x.x Use new_function_name() instead.
-    * @access     private
+    * certificate_request: the CSR bytes to be signed in PEM
     *
-    * @class
-    * @augments parent
-    * @mixes    mixin
+    * Optional parameters:
+    * hosts: an array of SAN (subject alternative names) which overrides the ones in the CSR
+    * subject: the certificate subject which overrides the ones in the CSR
+    * serial_sequence: a string specify the prefix which the generated certificate serial should have
+    * label: a string specifying which signer to be appointed to sign the CSR, useful when interacting with a remote multi-root CA signer
+    * profile: a string specifying the signing profile for the signer, useful when interacting with a remote multi-root CA signer
+    * bundle: a boolean specifying whether to include an "optimal" certificate bundle along with the certificate
     *
-    * @alias    realName
-    * @memberof namespace
-    *
-    * @see  Function/class relied on
-    * @link URL
-    * @global
-    *
-    * @fires   eventName
-    * @fires   className#eventName
-    * @listens event:eventName
-    * @listens className~event:eventName
-    *
-    * @param {type}   var           Description.
-    * @param {type}   [var]         Description of optional variable.
-    * @param {type}   [var=default] Description of optional variable with default variable.
-    * @param {Object} objectVar     Description.
-    * @param {type}   objectVar.key Description of a key in the objectVar parameter.
-    *
-    * @yield {type} Yielded value description.
     */
-  sign() {
+  async sign(certificate_request, hosts=[], subject={}, serial_sequence="", label="", profile="", bundle=false, self=this) {
+    return new Promise((resolve, reject) => {
+      // if (params.hosts && params.hosts.length > 0) params.hosts = hosts
+      // if (params.subject && params.subject.length > 0) params.subject = [subject]
+      // if (params.serial_sequence && params.serial_sequence.length > 0) params.serial_sequence = serial_sequence
+      // if (params.label && params.label.length > 0) params.label = label
+      // if (params.profile && params.profile.length > 0) params.profile = profile
+      // if (params.bundle && params.bundle.length > 0) params.bundle = bundle
 
+      let params = {
+        certificate_request,
+        hosts,
+        subject,
+        serial_sequence,
+        label,
+        profile,
+        bundle
+      }
+
+      self._client.post(self._apiPath("/sign"), self._authParams(params), (err, req, res, obj) => {
+        if (err) return reject(err)
+        return resolve(obj.result)
+      })
+    })
   }
 
   /**
@@ -329,6 +336,19 @@ class CFSSL {
     })
   }
 
+  /**
+  * Alias for health function which only results a boolean
+  *
+  * @return {Boolean} Returns true or false
+  */
+ async isHealthy() {
+  try {
+    const result = await this.health()
+    return result.healthy
+  } catch (err) {
+    return false
+  }
+}
 
   /**
   * Get info about a certificate and the certificate itself
@@ -356,20 +376,15 @@ class CFSSL {
   *                  + not_after is the certificate's end date.
   *                  + sigalg is the signature algorithm used to sign the certificate.
   */
-  async certinfo(certificate, remote_domain, serial, authority_key_id) {
-    const self = this
+  async certinfo(certificate, remote_domain="", serial="", authority_key_id="", self=this) {
     return new Promise((resolve,reject) => {
-      let params = {}
-      if (certificate) {
-        params.certificate = certificate
-      } else if (remote_domain) {
-        params.domain = remote_domain
-      } else if (serial || authority_key_id) {
-        params.serial = serial
-        params.authority_key_id = authority_key_id
-      } else {
-        return reject(new Error("Must pass certificate, domain, or serial/authority_key_id"))
-      }  
+      let params = {
+        certificate,
+        remote_domain,
+        serial,
+        authority_key_id
+      }
+      if (!params.certificate) throw new Error("Missing certificate object")
 
       self._client.post(self._apiPath("/certinfo"), self._authParams(params), (err, req, res, obj) => {
         if (err) return reject(err)
@@ -506,43 +521,45 @@ class CFSSL {
   /**
   * Generate a new private key and certificate
   *
-  * @param {type} common_names      Certificate common names
-  * @param {type} [cert_attributes] Certificate attributes
-  * @param {type} [label]           A string specifying which signer to be appointed to sign the CSR, useful when interacting with cfssl server that stands.
-  * @param {type} [profile]         A string specifying the signing profile for the signer.
-  * @param {type} [includeBundle]   A boolean specifying whether to include an "optimal" certificate bundle along with the certificate.
+  * Required parameters:
+  * request: a json object specifying the certificate request, 
+  *          exactly the one which can be sent to /api/v1/cfssl/newkey 
+  *          to generate a certificate signing request 
+  *          (referring to endpoint_newkey for how to write such object)
+  *
+  * Optional parameters:
+  * label: a string specifying which signer to be appointed to sign
+  *        the CSR, useful when interacting with cfssl server that stands
+  *        in front of a remote multi-root CA signer
+  * profile: a string specifying the signing profile for the signer
+  * bundle: a boolean specifying whether to include an "optimal"
+  *         certificate bundle along with the certificate
+  *
+  * Result:
+  * The returned result is a JSON object with four keys:
+  *
+  * private key: a PEM-encoded private key
+  * certificate_request: a PEM-encoded certificate request
+  * certificate: a PEM-encoded certificate, signed by the server
+  * sums: a JSON object holding both MD5 and SHA1 digests for the certificate
+  *       request and the certificate; note that this is the digest of the DER
+  *       contents of the certificate, not the PEM contents
+  * bundle: See the result of endpoint_bundle.txt (only included if the bundle parameter was set)
   * 
-  * @return {Object}  The returned result is a JSON object with four keys:
-  *                   + private key: a PEM-encoded private key.
-  *                   + certificate_request: a PEM-encoded certificate request.
-  *                   + certificate: a PEM-encoded certificate, signed by the server.
-  *                   + sums: a JSON object holding both MD5 and SHA1 digests for the certificate.
-  *                   + request and the certificate; note that this is the digest of the DER.
-  *                   + contents of the certificate, not the PEM contents.
-  *                   + bundle: See the result of endpoint_bundle.txt (only included if the bundle parameter was set).
   */
-  async newcert(common_names, cert_attributes, label, profile, includeBundle) {
-    const self = this
+  async newcert(request, label="", profile="", bundle=false, self=this) {
     return new Promise((resolve,reject) => {
-      if (!common_names || common_names.length === 0 || !cert_attributes)
-        return reject(new Error("Missing Parameters"))
-
-      if (!isArray(common_names))
-        common_names = [common_names]
-      if (!isArray(cert_attributes))
-        cert_attributes = [cert_attributes]        
+      // Massage the request a bit
+      if (request.hosts && !isArray(request.hosts)) request.hosts = [request.hosts]
+      if (request.names && !isArray(request.names)) request.names = [request.names]
+      if (!request.names || request.names == 0) throw new Error("Missing names in request object")
+      if (!request.CN || request.CN.length == 0) throw new Error("Missing CN in request object")
 
       let params = {
-        hosts: common_names,
-        names: cert_attributes
-      }
-
-      if (!isUndefined(label)) params.label = label
-      if (!isUndefined(profile)) params.profile = profile
-      if (!isUndefined(includeBundle)) {
-        params.bundle = includeBundle
-      } else {
-        params.bundle = false
+        request: request,
+        label: label,
+        profile: profile,
+        bundle: bundle
       }
 
       self._client.post(self._apiPath("/newcert"), self._authParams(params), (err, req, res, obj) => {
@@ -551,29 +568,6 @@ class CFSSL {
         return resolve(obj.result)
       })
     })
-    //   % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
-    //                                  Dload  Upload   Total   Spent    Left  Speed
-    // 100  2487    0  2338  100   149  56536   3603 --:--:-- --:--:-- --:--:-- 57024
-    // {
-    //     "errors": [],
-    //     "messages": [],
-    //     "result": {
-    //         "certificate": "-----BEGIN CERTIFICATE-----\nMIIDRzCCAjGgAwIBAgIIV2zafpyQtp4wCwYJKoZIhvcNAQELMIGMMQswCQYDVQQG\nEwJVUzETMBEGA1UECBMKQ2FsaWZvcm5pYTEWMBQGA1UEBxMNU2FuIEZyYW5jaXNj\nbzETMBEGA1UEChMKQ0ZTU0wgVEVTVDEbMBkGA1UEAxMSQ0ZTU0wgVEVTVCBSb290\nIENBMR4wHAYJKoZIhvcNAQkBFg90ZXN0QHRlc3QubG9jYWwwHhcNMTUwODAzMDYx\nMjAwWhcNMTYwODAyMDYxMjAwWjBqMQswCQYDVQQGEwJVUzEUMBIGA1UEChMLZXhh\nbXBsZS5jb20xFjAUBgNVBAcTDVNhbiBGcmFuY2lzY28xEzARBgNVBAgTCkNhbGlm\nb3JuaWExGDAWBgNVBAMTD3d3dy5leGFtcGxlLmNvbTBZMBMGByqGSM49AgEGCCqG\nSM49AwEHA0IABK/CtZaQ4VliKE+DLIVGLwtSxJgtUKRzGvN1EwI3HRgKDQ3l3urB\nIzHtUcdMq6HZb8jX0O9fXYUOf4XWggrLk1ajgZwwgZkwDgYDVR0PAQH/BAQDAgCg\nMB0GA1UdJQQWMBQGCCsGAQUFBwMBBggrBgEFBQcDAjAMBgNVHRMBAf8EAjAAMB0G\nA1UdDgQWBBTF8UwoRdK0rWK8FWiyRxl3H2Wr+TAfBgNVHSMEGDAWgBS30veEuqg5\n1fusEM4p/YuWpBPsvTAaBgNVHREEEzARgg93d3cuZXhhbXBsZS5jb20wCwYJKoZI\nhvcNAQELA4IBAQCT+9xoBO39nFesT0dmdqpwHExU09/IYrkvYwWesX5U9z/f3HYP\nLz/NnXIs6a+k8MglvZgHwr5R8nzVtayfPTWyML6L6AOX8EfV5UXbnXW4XRUhHAik\n+E1gYhOCD1dLQJyQkX8VVr725BUk1yQD3Kf0PJUvagLJjn8Gn7QoGWfvVgpR8iMd\ncBJqlx8Z9KCYcLrpXliD8OJqT7Z8TGbnehpcaNwPPI6dMX57wgXSNuP5g8OkxMcL\nxZEP3q9JRjN3ZiM5xIeoTc/zl1WhZ+YpOHSbv/T9DX3f74ms9GEc0JnR8iENJTu6\nRx0/qPDPpqZ+Fr9v/13/OvQ+jAY5qe/6l1d6\n-----END CERTIFICATE-----\n",
-    //         "certificate_request": "-----BEGIN CERTIFICATE REQUEST-----\nMIIBUjCB+QIBADBqMQswCQYDVQQGEwJVUzEUMBIGA1UEChMLZXhhbXBsZS5jb20x\nFjAUBgNVBAcTDVNhbiBGcmFuY2lzY28xEzARBgNVBAgTCkNhbGlmb3JuaWExGDAW\nBgNVBAMTD3d3dy5leGFtcGxlLmNvbTBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IA\nBK/CtZaQ4VliKE+DLIVGLwtSxJgtUKRzGvN1EwI3HRgKDQ3l3urBIzHtUcdMq6HZ\nb8jX0O9fXYUOf4XWggrLk1agLTArBgkqhkiG9w0BCQ4xHjAcMBoGA1UdEQQTMBGC\nD3d3dy5leGFtcGxlLmNvbTAKBggqhkjOPQQDAgNIADBFAiAcvfhXnsLtzep2sKSa\n36W7G9PRbHh8zVGlw3Hph8jR1QIhAKfrgplKwXcUctU5grjQ8KXkJV8RxQUo5KKs\ngFnXYtkb\n-----END CERTIFICATE REQUEST-----\n",
-    //         "private_key": "-----BEGIN EC PRIVATE KEY-----\nMHcCAQEEIJfVVIvXclN1jCWefEwhYYq7y1ya2RjxO5o8QjehD3YdoAoGCCqGSM49\nAwEHoUQDQgAEr8K1lpDhWWIoT4MshUYvC1LEmC1QpHMa83UTAjcdGAoNDeXe6sEj\nMe1Rx0yrodlvyNfQ719dhQ5/hdaCCsuTVg==\n-----END EC PRIVATE KEY-----\n",
-    //         "sums": {
-    //             "certificate": {
-    //                 "md5": "E9308D1892F1B77E6721EA2F79C026BE",
-    //                 "sha-1": "4640E6DEC2C40B74F46C409C1D31928EE0073D25"
-    //             },
-    //             "certificate_request": {
-    //                 "md5": "AA924136405006E36CEE39FED9CBA5D7",
-    //                 "sha-1": "DF955A43DF669D38E07BF0479789D13881DC9024"
-    //             }
-    //         }
-    //     },
-    //     "success": true
-    // }
   }
   
   /**
@@ -643,18 +637,4 @@ class CFSSL {
   }
 }
 
-const cfssl = new CFSSL()
-
-cfssl.init_ca("www.example.com", [{"C":"US", "ST":"California", "L":"San Francisco", "O":"example.com"}]).then((result) => {
-  console.log(result)
-  //return cfssl.newcert("google.com", [{"C":"HK", "ST":"Hong Kong", "L":"Hong Kong", "O":"google"}])
-  // return cfssl.info("primary")
-  // return cfssl.scaninfo()
-  // return cfssl.scan("www.google.com")
-  // return cfssl.certinfo(null, 'www.google.com')
-  return cfssl.health()
-}).then((result) => {
-  console.log(result)
-}).catch((err) => {
-  console.error(err)
-})
+module.exports = CFSSL
